@@ -1,0 +1,7 @@
+# SHARP API 服务依赖
+
+# 核心依赖
+fastapi[standard]
+python-multipart>=0.0.6
+sse-starlette>=1.8.0
+pillow>=10.0.0

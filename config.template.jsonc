@@ -1,0 +1,67 @@
+{
+  // ==================== 服务器配置 ====================
+  "server": {
+    // 服务器监听地址，0.0.0.0 表示监听所有网络接口
+    "host": "0.0.0.0",
+    
+    // 服务器端口
+    "port": 8000,
+    
+    // 日志级别: DEBUG, INFO, WARNING, ERROR, CRITICAL
+    "log_level": "INFO"
+  },
+
+  // ==================== 模型配置 ====================
+  "model": {
+    // 模型检查点路径
+    // - 如果文件存在，直接加载
+    // - 如果文件不存在，自动从官方 URL 下载
+    // - 设置为 null 则总是下载
+    "checkpoint_path": "sharp_2572gikvuh.pt",
+    
+    // 计算设备选择
+    // - "auto": 自动选择 (优先级: cuda > mps > cpu)
+    // - "cuda": 使用 NVIDIA GPU
+    // - "mps": 使用 Apple Silicon GPU
+    // - "cpu": 使用 CPU
+    "device": "auto"
+  },
+
+  // ==================== 存储配置 ====================
+  "storage": {
+    // 输出文件保存目录
+    "output_dir": "output/api_results",
+    
+    // 压缩后是否保留原始 PLY 文件
+    // - true: 保留 .ply 和 .sog 两个文件
+    // - false: 只保留压缩后的 .sog 文件
+    "keep_ply": false
+  },
+
+  // ==================== 压缩配置 ====================
+  "compression": {
+    // 是否启用压缩
+    // - true: 转换完成后自动压缩为 .sog 格式
+    // - false: 只生成 .ply 文件，不压缩
+    "enabled": true,
+    
+    // 压缩命令（通常是 npx 或 node）
+    "command": "npx",
+    
+    // 压缩命令参数模板
+    // {input_file} 和 {output_file} 会被自动替换
+    "args_template": [
+      "splat-transform",
+      "{input_file}",
+      "{output_file}"
+    ],
+    
+    // 最大并发压缩任务数
+    // 根据 CPU 核心数调整，建议设置为核心数的 50%-100%
+    "max_workers": 2,
+    
+    // 压缩超时时间（秒）
+    // 如果压缩时间超过此值，任务将被终止
+    "timeout": 300
+  }
+}

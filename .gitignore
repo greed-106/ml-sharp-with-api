@@ -164,3 +164,7 @@ cython_debug/
 .DS_STORE
 *.pt
 .aider*
+
+node_modules/
+output/
+config.jsonc
