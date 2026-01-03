@@ -21,6 +21,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from PIL import Image
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
+import json
 
 from sharp.cli.predict import DEFAULT_MODEL_URL
 from sharp.models import PredictorParams, create_predictor
@@ -385,7 +386,7 @@ async def stream_status(task_id: str):
             async def completed_event_generator():
                 yield {
                     "event": "status",
-                    "data": {"status": "completed"}
+                    "data": json.dumps({"status": "completed"})
                 }
             
             return EventSourceResponse(completed_event_generator())
@@ -410,7 +411,7 @@ async def stream_status(task_id: str):
                 
                 yield {
                     "event": "status",
-                    "data": data
+                    "data": json.dumps(data)
                 }
             
             # 持续推送更新
@@ -418,7 +419,7 @@ async def stream_status(task_id: str):
                 update = await status_queue.get()
                 yield {
                     "event": "status",
-                    "data": update
+                    "data": json.dumps(update)
                 }
                 
                 # 如果任务完成或失败，结束流
