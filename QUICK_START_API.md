@@ -27,8 +27,15 @@ cp config.template.jsonc config.jsonc
 - `compression.enabled`: 是否启用压缩（默认 true）
 - `compression.max_workers`: 并发压缩任务数（默认 2）
 - `storage.keep_ply`: 压缩后是否保留 PLY 文件（默认 false）
-- `storage.output_dir`: 输出文件目录（默认 output/api_results）
+- `storage.output_dir`: 输出文件目录（默认 output/results）
 - `model.device`: 设备选择（默认 auto，自动选择 cuda/mps/cpu）
+
+### 元数据存储
+
+API会自动将每个生成的PLY文件的元数据（内参矩阵、外参矩阵、图像分辨率等）存储到SQLite数据库中：
+- 数据库位置：可在配置文件中设置 `storage.db_path`（默认：`output/sqlite/metadata.db`）
+- 只有通过API生成的文件才会记录元数据
+- 可通过 `/metadata/{task_id}` 端点查询
 
 ## 3. 启动服务
 
@@ -153,7 +160,7 @@ A: 修改 `config.json`：
 
 ### Q: 输出文件在哪里？
 
-A: 默认在 `output/api_results/` 目录，可在配置文件中修改。
+A: 默认在 `output/results/` 目录，可在配置文件中修改。
 
 ### Q: 如何保留原始 PLY 文件？
 

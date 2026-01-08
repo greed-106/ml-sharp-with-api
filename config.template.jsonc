@@ -30,12 +30,15 @@
   // ==================== 存储配置 ====================
   "storage": {
     // 输出文件保存目录
-    "output_dir": "output/api_results",
+    "output_dir": "output/results",
     
     // 压缩后是否保留原始 PLY 文件
     // - true: 保留 .ply 和 .sog 两个文件
     // - false: 只保留压缩后的 .sog 文件
-    "keep_ply": false
+    "keep_ply": false,
+    
+    // 元数据数据库路径
+    "db_path": "output/sqlite/metadata.db"
   },
 
   // ==================== 压缩配置 ====================

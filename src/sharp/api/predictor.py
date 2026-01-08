@@ -107,7 +107,7 @@ def predict_from_image_bytes(
     device: torch.device,
     output_path: Path,
     task_id: str,
-) -> Path:
+) -> tuple[Path, dict]:
     """
     从图片字节数据预测并保存 PLY 文件
     
@@ -121,7 +121,7 @@ def predict_from_image_bytes(
         task_id: 任务 ID（用于文件命名）
     
     Returns:
-        保存的 PLY 文件路径
+        (ply_path, metadata): PLY文件路径和元数据字典
     """
     # 加载图片并提取焦距（与 CLI 一致）
     image, f_px = load_image_from_bytes(image_bytes)
@@ -140,4 +140,28 @@ def predict_from_image_bytes(
     
     LOGGER.info(f"Saved PLY to {ply_path}")
     
-    return ply_path
+    # 构建内参矩阵（3x3）
+    intrinsic_matrix = [
+        f_px, 0.0, width * 0.5,
+        0.0, f_px, height * 0.5,
+        0.0, 0.0, 1.0
+    ]
+    
+    # 构建外参矩阵（4x4单位矩阵）
+    extrinsic_matrix = [
+        1.0, 0.0, 0.0, 0.0,
+        0.0, 1.0, 0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0,
+        0.0, 0.0, 0.0, 1.0
+    ]
+    
+    # 构建元数据
+    metadata = {
+        "intrinsic_matrix": intrinsic_matrix,
+        "extrinsic_matrix": extrinsic_matrix,
+        "image_width": width,
+        "image_height": height,
+        "focal_length_px": float(f_px)
+    }
+    
+    return ply_path, metadata

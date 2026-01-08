@@ -80,8 +80,9 @@ cp config.template.jsonc config.jsonc
   
   // 存储配置
   "storage": {
-    "output_dir": "output/api_results",  // 输出目录
-    "keep_ply": false             // 压缩后是否保留 PLY 文件
+    "output_dir": "output/results",  // 输出目录
+    "keep_ply": false,            // 压缩后是否保留 PLY 文件
+    "db_path": "output/sqlite/metadata.db"  // 元数据数据库路径
   },
   
   // 压缩配置
@@ -182,7 +183,30 @@ uvicorn sharp.api.server:app --host 0.0.0.0 --port 8000 --reload
 下载处理完成的文件（.sog 或 .ply）。
 
 
-### 4. 健康检查
+### 4. 获取元数据
+
+**GET** `/metadata/{task_id}`
+
+获取PLY文件的元数据信息（内参矩阵和外参矩阵）。
+
+**响应:**
+```json
+{
+  "task_id": "abc123-def456-ghi789",
+  "intrinsic_matrix": [1234.56, 0.0, 960.0, 0.0, 1234.56, 540.0, 0.0, 0.0, 1.0],
+  "extrinsic_matrix": [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+  "created_at": "2025-01-08 12:34:56"
+}
+```
+
+**说明:**
+- `task_id`: 任务ID
+- `intrinsic_matrix`: 3x3相机内参矩阵（按行展开为9个元素的数组）
+- `extrinsic_matrix`: 4x4相机外参矩阵（按行展开为16个元素的数组，默认为单位矩阵）
+- `created_at`: 创建时间戳
+
+
+### 5. 健康检查
 
 **GET** `/health`
 

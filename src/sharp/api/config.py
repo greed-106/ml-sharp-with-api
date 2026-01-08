@@ -43,8 +43,9 @@ class ModelConfig(BaseModel):
 
 class StorageConfig(BaseModel):
     """存储配置"""
-    output_dir: str = Field(default="output/api_results", description="输出文件目录")
+    output_dir: str = Field(default="output/results", description="输出文件目录")
     keep_ply: bool = Field(default=False, description="压缩后是否保留原始 PLY 文件")
+    db_path: str = Field(default="output/sqlite/metadata.db", description="元数据数据库路径")
 
 
 class CompressionConfig(BaseModel):

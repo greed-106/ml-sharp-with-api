@@ -29,6 +29,7 @@ from sharp.utils.gaussians import save_ply
 
 from .config import get_config
 from .predictor import load_image_from_bytes, predict_from_image_bytes
+from .database import get_db, initialize_db, close_db
 
 LOGGER = logging.getLogger(__name__)
 
@@ -252,7 +253,7 @@ async def process_task_queue():
             output_dir = Path(config.storage.output_dir)
             
             # 执行预测（使用与 CLI 一致的逻辑）
-            ply_path = await asyncio.to_thread(
+            ply_path, metadata = await asyncio.to_thread(
                 predict_from_image_bytes,
                 model,
                 image_bytes,
@@ -262,6 +263,15 @@ async def process_task_queue():
             )
             
             LOGGER.info(f"PLY saved for task {task_id}: {ply_path}")
+            
+            # 保存元数据到数据库
+            db = get_db()
+            await db.insert_metadata(
+                task_id=task_id,
+                intrinsic_matrix=metadata["intrinsic_matrix"],
+                extrinsic_matrix=metadata["extrinsic_matrix"]
+            )
+            LOGGER.info(f"Metadata saved to database for task {task_id}")
             
             # 如果启用压缩，添加到压缩队列
             if config.compression.enabled:
@@ -304,6 +314,11 @@ async def startup_event():
     
     config = get_config()
     
+    # 初始化数据库
+    db_path = Path(config.storage.db_path)
+    await initialize_db(db_path)
+    LOGGER.info(f"Database initialized at {db_path}")
+    
     # 初始化压缩信号量
     compression_semaphore = asyncio.Semaphore(config.compression.max_workers)
     
@@ -314,6 +329,18 @@ async def startup_event():
     LOGGER.info("Task queue processors started")
     LOGGER.info(f"Compression workers: {config.compression.max_workers}")
     LOGGER.info(f"Output directory: {config.storage.output_dir}")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """关闭时清理资源"""
+    LOGGER.info("Shutting down server...")
+    
+    # 关闭数据库连接
+    await close_db()
+    LOGGER.info("Database connection closed")
+    
+    LOGGER.info("Server shutdown complete")
 
 
 @app.post("/predict", response_model=TaskStatus)
@@ -469,6 +496,26 @@ async def get_result(task_id: str):
     
     # 文件不存在
     raise HTTPException(status_code=404, detail="Result file not found")
+
+
+@app.get("/metadata/{task_id}")
+async def get_metadata(task_id: str):
+    """
+    获取PLY文件的元数据
+    
+    - **task_id**: 任务 ID
+    
+    返回内参矩阵和外参矩阵
+    """
+    db = get_db()
+    
+    # 查询元数据
+    metadata = await db.get_metadata(task_id)
+    
+    if metadata is None:
+        raise HTTPException(status_code=404, detail="Metadata not found")
+    
+    return metadata
 
 
 @app.get("/health")
