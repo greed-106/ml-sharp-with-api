@@ -48,7 +48,7 @@
     // - false: 只生成 .ply 文件，不压缩
     "enabled": true,
     
-    // 压缩命令（通常是 npx 或 node）
+    // 压缩命令 Windows 使用npx.cmd Linux 使用 npx
     "command": "npx",
     
     // 压缩命令参数模板
@@ -61,7 +61,7 @@
     
     // 最大并发压缩任务数
     // 根据 CPU 核心数调整，建议设置为核心数的 50%-100%
-    "max_workers": 2,
+    "max_workers": 10,
     
     // 压缩超时时间（秒）
     // 如果压缩时间超过此值，任务将被终止
