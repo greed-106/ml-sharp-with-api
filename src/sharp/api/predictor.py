@@ -123,14 +123,34 @@ def predict_from_image_bytes(
     Returns:
         (ply_path, metadata): PLY文件路径和元数据字典
     """
+    from .config import get_config
+    
+    config = get_config()
+    
     # 加载图片并提取焦距（与 CLI 一致）
     image, f_px = load_image_from_bytes(image_bytes)
     height, width = image.shape[:2]
     
     LOGGER.info(f"Processing image: {width}x{height}, focal_length: {f_px:.2f}px")
     
+    # 从配置读取优化选项
+    use_fp16 = config.model.use_fp16 and device.type in ["cuda", "mps"]
+    use_gpu_postprocessing = config.model.use_gpu_postprocessing and device.type in ["cuda", "mps"]
+    
+    if use_fp16:
+        LOGGER.info("Using FP16 precision for inference")
+    if use_gpu_postprocessing:
+        LOGGER.info("Using GPU postprocessing")
+    
     # 执行预测（使用 CLI 的 predict_image 函数）
-    gaussians = predict_image(predictor, image, f_px, device)
+    gaussians = predict_image(
+        predictor,
+        image,
+        f_px,
+        device,
+        use_fp16=use_fp16,
+        use_gpu_postprocessing=use_gpu_postprocessing,
+    )
     
     # 保存 PLY 文件
     output_path.mkdir(exist_ok=True, parents=True)

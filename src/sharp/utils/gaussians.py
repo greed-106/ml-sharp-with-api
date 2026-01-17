@@ -67,7 +67,9 @@ def get_unprojection_matrix(
         A 4x4 matrix to transform Gaussians from NDC space to Euclidean space.
     """
     device = intrinsics.device
+    dtype = intrinsics.dtype
     image_width, image_height = image_shape
+    
     # This matrix converts OpenCV pixel coordinates to NDC coordinates where
     # (-1, 1) denotes the top left and (1, 1) the bottom right of the image.
     #
@@ -82,6 +84,7 @@ def get_unprojection_matrix(
             [0.0, 0.0, 0.0, 1.0],
         ],
         device=device,
+        dtype=dtype,
     )
     return torch.linalg.inv(ndc_matrix @ intrinsics @ extrinsics)
 
@@ -91,19 +94,34 @@ def unproject_gaussians(
     extrinsics: torch.Tensor,
     intrinsics: torch.Tensor,
     image_shape: tuple[int, int],
+    use_gpu: bool = True,
 ) -> Gaussians3D:
-    """Unproject Gaussians from NDC space to world coordinates."""
+    """Unproject Gaussians from NDC space to world coordinates.
+
+    Args:
+        gaussians_ndc: Gaussians in NDC space.
+        extrinsics: Camera extrinsics matrix (4x4).
+        intrinsics: Camera intrinsics matrix (4x4).
+        image_shape: Image dimensions (width, height).
+        use_gpu: If True, perform SVD on GPU for faster postprocessing.
+
+    Returns:
+        Gaussians in world coordinates.
+    """
     unprojection_matrix = get_unprojection_matrix(extrinsics, intrinsics, image_shape)
-    gaussians = apply_transform(gaussians_ndc, unprojection_matrix[:3])
+    gaussians = apply_transform(gaussians_ndc, unprojection_matrix[:3], use_gpu=use_gpu)
     return gaussians
 
 
-def apply_transform(gaussians: Gaussians3D, transform: torch.Tensor) -> Gaussians3D:
+def apply_transform(
+    gaussians: Gaussians3D, transform: torch.Tensor, use_gpu: bool = True
+) -> Gaussians3D:
     """Apply an affine transformation to 3D Gaussians.
 
     Args:
         gaussians: The Gaussians to transform.
         transform: An affine transform with shape 3x4.
+        use_gpu: If True, perform SVD on GPU for faster computation.
 
     Returns:
         The transformed Gaussians.
@@ -113,14 +131,19 @@ def apply_transform(gaussians: Gaussians3D, transform: torch.Tensor) -> Gaussian
     transform_linear = transform[..., :3, :3]
     transform_offset = transform[..., :3, 3]
 
+    # 变换位置向量
     mean_vectors = gaussians.mean_vectors @ transform_linear.T + transform_offset
+
+    # 变换协方差矩阵
     covariance_matrices = compose_covariance_matrices(
         gaussians.quaternions, gaussians.singular_values
     )
     covariance_matrices = (
         transform_linear @ covariance_matrices @ transform_linear.transpose(-1, -2)
     )
-    quaternions, singular_values = decompose_covariance_matrices(covariance_matrices)
+    quaternions, singular_values = decompose_covariance_matrices(
+        covariance_matrices, use_gpu=use_gpu
+    )
 
     return Gaussians3D(
         mean_vectors=mean_vectors,
@@ -133,11 +156,14 @@ def apply_transform(gaussians: Gaussians3D, transform: torch.Tensor) -> Gaussian
 
 def decompose_covariance_matrices(
     covariance_matrices: torch.Tensor,
+    use_gpu: bool = True,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Decompose 3D covariance matrices into quaternions and singular values.
 
     Args:
         covariance_matrices: The covariance matrices to decompose.
+        use_gpu: If True, perform SVD on GPU (faster but may have numerical issues).
+                 If False, use CPU with FP64 (slower but more stable).
 
     Returns:
         Quaternion and singular values corresponding to the orientation and scales of
@@ -148,7 +174,32 @@ def decompose_covariance_matrices(
     device = covariance_matrices.device
     dtype = covariance_matrices.dtype
 
-    # We convert to fp64 to avoid numerical errors.
+    if use_gpu and device.type in ["cuda", "mps"]:
+        # GPU 加速路径：直接在 GPU 上计算，避免 CPU-GPU 数据传输
+        try:
+            rotations, singular_values_2, _ = torch.linalg.svd(covariance_matrices)
+
+            # NOTE: in SVD, it is possible that U and VT are both reflections.
+            # We need to correct them.
+            batch_idx, gaussian_idx = torch.where(torch.linalg.det(rotations) < 0)
+            num_reflections = len(gaussian_idx)
+            if num_reflections > 0:
+                LOGGER.debug(
+                    "Received %d reflection matrices from SVD. Flipping them to rotations.",
+                    num_reflections,
+                )
+                # Flip the last column of reflection and make it a rotation.
+                rotations[batch_idx, gaussian_idx, :, -1] *= -1
+
+            quaternions = linalg.quaternions_from_rotation_matrices(rotations, use_gpu=True)
+            singular_values = singular_values_2.sqrt()
+            return quaternions, singular_values
+
+        except Exception as e:
+            LOGGER.warning(f"GPU SVD failed: {e}. Falling back to CPU with FP64.")
+            # 失败则回退到 CPU 路径
+
+    # CPU 路径：使用 FP64 提高数值稳定性（原始实现）
     covariance_matrices = covariance_matrices.detach().cpu().to(torch.float64)
     rotations, singular_values_2, _ = torch.linalg.svd(covariance_matrices)
 
@@ -163,7 +214,7 @@ def decompose_covariance_matrices(
         )
         # Flip the last column of reflection and make it a rotation.
         rotations[batch_idx, gaussian_idx, :, -1] *= -1
-    quaternions = linalg.quaternions_from_rotation_matrices(rotations)
+    quaternions = linalg.quaternions_from_rotation_matrices(rotations, use_gpu=False)
     quaternions = quaternions.to(dtype=dtype, device=device)
     singular_values = singular_values_2.sqrt().to(dtype=dtype, device=device)
     return quaternions, singular_values
@@ -183,7 +234,18 @@ def compose_covariance_matrices(
     """
     device = quaternions.device
     rotations = linalg.rotation_matrices_from_quaternions(quaternions)
-    diagonal_matrix = torch.eye(3, device=device) * singular_values[..., :, None]
+    
+    # 优化：直接构建对角矩阵，避免使用 torch.eye
+    # diagonal_matrix = torch.eye(3, device=device) * singular_values[..., :, None]
+    # 改为直接创建对角矩阵
+    batch_shape = singular_values.shape[:-1]
+    diagonal_matrix = torch.zeros(
+        batch_shape + (3, 3), device=device, dtype=singular_values.dtype
+    )
+    diagonal_matrix[..., 0, 0] = singular_values[..., 0]
+    diagonal_matrix[..., 1, 1] = singular_values[..., 1]
+    diagonal_matrix[..., 2, 2] = singular_values[..., 2]
+    
     return rotations @ diagonal_matrix.square() @ rotations.transpose(-1, -2)
 
 

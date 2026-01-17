@@ -137,6 +137,13 @@ async def get_model():
             _model_instance.eval()
             _model_instance.to(_device)
             
+            # 应用 FP16 优化（如果配置启用且设备支持）
+            if config.model.use_fp16 and _device.type in ["cuda", "mps"]:
+                LOGGER.info("Converting model to FP16 precision")
+                _model_instance = _model_instance.half()
+            elif config.model.use_fp16 and _device.type == "cpu":
+                LOGGER.warning("FP16 not supported on CPU, using FP32")
+            
             LOGGER.info("Model loaded successfully")
     
     return _model_instance, _device

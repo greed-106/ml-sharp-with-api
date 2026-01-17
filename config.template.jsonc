@@ -24,7 +24,19 @@
     // - "cuda": 使用 NVIDIA GPU
     // - "mps": 使用 Apple Silicon GPU
     // - "cpu": 使用 CPU
-    "device": "auto"
+    "device": "auto",
+    
+    // 是否使用 FP16 半精度推理
+    // - true: 使用 FP16，减少约 50% 显存占用，略微降低精度
+    // - false: 使用 FP32，默认精度
+    // 注意: 仅在 CUDA/MPS 设备上有效，CPU 会自动使用 FP32
+    "use_fp16": true,
+    
+    // 是否在 GPU 上执行后处理
+    // - true: 在 GPU 上执行 SVD 和四元数转换（快 10-20 倍）
+    // - false: 在 CPU 上执行（更稳定但慢）
+    // 注意: 仅在 CUDA/MPS 设备上有效
+    "use_gpu_postprocessing": true
   },
 
   // ==================== 存储配置 ====================

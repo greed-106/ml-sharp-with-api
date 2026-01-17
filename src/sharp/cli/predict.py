@@ -72,6 +72,19 @@ DEFAULT_MODEL_URL = "https://ml-site.cdn-apple.com/models/sharp/sharp_2572gikvuh
     default="default",
     help="Device to run on. ['cpu', 'mps', 'cuda']",
 )
+@click.option(
+    "--precision",
+    type=click.Choice(["fp32", "fp16"], case_sensitive=False),
+    default="fp32",
+    help="Model precision for inference. fp16 reduces memory usage and may improve speed.",
+)
+@click.option(
+    "--gpu-postprocessing/--cpu-postprocessing",
+    "gpu_postprocessing",
+    is_flag=True,
+    default=True,
+    help="Use GPU for postprocessing (faster) or CPU with FP64 (more stable). Default: GPU.",
+)
 @click.option("-v", "--verbose", is_flag=True, help="Activate debug logs.")
 def predict_cli(
     input_path: Path,
@@ -79,6 +92,8 @@ def predict_cli(
     checkpoint_path: Path,
     with_rendering: bool,
     device: str,
+    precision: str,
+    gpu_postprocessing: bool,
     verbose: bool,
 ):
     """Predict Gaussians from input images."""
@@ -125,6 +140,13 @@ def predict_cli(
     gaussian_predictor.load_state_dict(state_dict)
     gaussian_predictor.eval()
     gaussian_predictor.to(device)
+    
+    # 应用 FP16 优化
+    if precision.lower() == "fp16":
+        if device == "cpu":
+            LOGGER.warning("FP16 on CPU may be slow. Consider using CUDA/MPS for better performance.")
+        LOGGER.info("Converting model to FP16 precision")
+        gaussian_predictor = gaussian_predictor.half()
 
     output_path.mkdir(exist_ok=True, parents=True)
 
@@ -142,7 +164,24 @@ def predict_cli(
             device=device,
             dtype=torch.float32,
         )
-        gaussians = predict_image(gaussian_predictor, image, f_px, torch.device(device))
+        
+        # 根据精度选项决定是否使用 FP16
+        use_fp16 = precision.lower() == "fp16"
+        
+        # 根据设备类型决定是否使用 GPU 后处理
+        use_gpu_post = gpu_postprocessing and device in ["cuda", "mps"]
+        if gpu_postprocessing and device == "cpu":
+            LOGGER.info("GPU postprocessing disabled on CPU device.")
+            use_gpu_post = False
+        
+        gaussians = predict_image(
+            gaussian_predictor,
+            image,
+            f_px,
+            torch.device(device),
+            use_fp16=use_fp16,
+            use_gpu_postprocessing=use_gpu_post,
+        )
 
         LOGGER.info("Saving 3DGS to %s", output_path)
         save_ply(gaussians, f_px, (height, width), output_path / f"{image_path.stem}.ply")
@@ -161,14 +200,32 @@ def predict_image(
     image: np.ndarray,
     f_px: float,
     device: torch.device,
+    use_fp16: bool = False,
+    use_gpu_postprocessing: bool = True,
 ) -> Gaussians3D:
-    """Predict Gaussians from an image."""
+    """Predict Gaussians from an image.
+    
+    Args:
+        predictor: 预测器模型
+        image: 输入图片 (H, W, 3) numpy 数组
+        f_px: 焦距（像素单位）
+        device: 计算设备
+        use_fp16: 是否使用 FP16 精度进行推理
+        use_gpu_postprocessing: 是否在 GPU 上执行后处理（更快但可能有数值误差）
+    
+    Returns:
+        Gaussians3D: 预测的高斯点云
+    """
     internal_shape = (1536, 1536)
 
     LOGGER.info("Running preprocessing.")
-    image_pt = torch.from_numpy(image.copy()).float().to(device).permute(2, 0, 1) / 255.0
+    
+    # 根据精度选择数据类型
+    dtype = torch.float16 if use_fp16 else torch.float32
+    
+    image_pt = torch.from_numpy(image.copy()).to(dtype).to(device).permute(2, 0, 1) / 255.0
     _, height, width = image_pt.shape
-    disparity_factor = torch.tensor([f_px / width]).float().to(device)
+    disparity_factor = torch.tensor([f_px / width]).to(dtype).to(device)
 
     image_resized_pt = F.interpolate(
         image_pt[None],
@@ -191,7 +248,7 @@ def predict_image(
                 [0, 0, 0, 1],
             ]
         )
-        .float()
+        .float()  # 后处理始终使用 float32
         .to(device)
     )
     intrinsics_resized = intrinsics.clone()
@@ -200,7 +257,11 @@ def predict_image(
 
     # Convert Gaussians to metrics space.
     gaussians = unproject_gaussians(
-        gaussians_ndc, torch.eye(4).to(device), intrinsics_resized, internal_shape
+        gaussians_ndc,
+        torch.eye(4).to(device),
+        intrinsics_resized,
+        internal_shape,
+        use_gpu=use_gpu_postprocessing,
     )
 
     return gaussians

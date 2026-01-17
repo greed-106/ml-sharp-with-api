@@ -39,6 +39,8 @@ class ModelConfig(BaseModel):
     """模型配置"""
     checkpoint_path: Optional[str] = Field(default=None, description="模型检查点路径，为空则自动下载")
     device: str = Field(default="auto", description="设备类型: auto, cuda, mps, cpu")
+    use_fp16: bool = Field(default=False, description="是否使用 FP16 精度推理（减少显存占用）")
+    use_gpu_postprocessing: bool = Field(default=True, description="是否在 GPU 上执行后处理（更快）")
 
 
 class StorageConfig(BaseModel):
