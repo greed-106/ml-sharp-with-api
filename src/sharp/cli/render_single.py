@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import click
@@ -64,8 +65,16 @@ def parse_intrinsics_from_filename(filename: str) -> tuple[float, int, int] | No
     default="cuda",
     help="Device to run on. ['cpu', 'cuda']",
 )
+@click.option(
+    "--num-threads",
+    type=int,
+    default=4,
+    help="Number of threads for parallel rendering.",
+)
 @click.option("-v", "--verbose", is_flag=True, help="Activate debug logs.")
-def render_single_cli(input_path: Path, output_path: Path, device: str, verbose: bool):
+def render_single_cli(
+    input_path: Path, output_path: Path, device: str, num_threads: int, verbose: bool
+):
     """Render single PNG images from PLY files at original viewpoint."""
     logging_utils.configure(logging.DEBUG if verbose else logging.INFO)
 
@@ -87,43 +96,92 @@ def render_single_cli(input_path: Path, output_path: Path, device: str, verbose:
         return
 
     LOGGER.info("Found %d PLY files to render.", len(ply_files))
+    LOGGER.info("Using %d threads for parallel rendering.", num_threads)
 
-    for ply_path in ply_files:
-        LOGGER.info("Rendering %s", ply_path.name)
+    # 使用多线程并行处理
+    success_count = 0
+    failed_count = 0
+    
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
+        # 提交所有任务
+        future_to_ply = {
+            executor.submit(
+                process_single_ply, ply_path, output_path, device
+            ): ply_path
+            for ply_path in ply_files
+        }
         
-        # 从文件名解析内参
-        intrinsics_data = parse_intrinsics_from_filename(ply_path.name)
+        # 处理完成的任务
+        for future in as_completed(future_to_ply):
+            ply_path = future_to_ply[future]
+            try:
+                result = future.result()
+                if result:
+                    success_count += 1
+                else:
+                    failed_count += 1
+            except Exception as e:
+                LOGGER.error("Error processing %s: %s", ply_path.name, e)
+                failed_count += 1
+    
+    LOGGER.info(
+        "Rendering complete. Success: %d, Failed: %d", success_count, failed_count
+    )
+
+
+def process_single_ply(ply_path: Path, output_path: Path, device: str) -> bool:
+    """处理单个PLY文件的渲染任务。
+    
+    Args:
+        ply_path: PLY文件路径
+        output_path: 输出目录路径
+        device: 计算设备
         
-        if intrinsics_data is None:
-            LOGGER.warning(
-                "Cannot parse intrinsics from filename %s. "
-                "Expected format: {name}_{f_px}_{width}_{height}.ply. Skipping.",
-                ply_path.name,
-            )
-            continue
-        
-        f_px, width, height = intrinsics_data
-        LOGGER.info("  Intrinsics: f_px=%.1f, resolution=%dx%d", f_px, width, height)
-        
-        # 加载PLY文件
-        try:
-            gaussians, _ = load_ply(ply_path)
-        except Exception as e:
-            LOGGER.error("Failed to load %s: %s. Skipping.", ply_path.name, e)
-            continue
-        
-        # 渲染单张图片
-        output_image_path = output_path / f"{ply_path.stem}.png"
-        render_single_image(
-            gaussians=gaussians,
-            f_px=f_px,
-            width=width,
-            height=height,
-            output_path=output_image_path,
-            device=device,
+    Returns:
+        True if successful, False otherwise
+    """
+    LOGGER.info("Rendering %s", ply_path.name)
+    
+    # 从文件名解析内参
+    intrinsics_data = parse_intrinsics_from_filename(ply_path.name)
+    
+    if intrinsics_data is None:
+        LOGGER.warning(
+            "Cannot parse intrinsics from filename %s. "
+            "Expected format: {name}_{f_px}_{width}_{height}.ply. Skipping.",
+            ply_path.name,
         )
-        
-        LOGGER.info("  Saved to %s", output_image_path)
+        return False
+    
+    f_px, width, height = intrinsics_data
+    LOGGER.info("  Intrinsics: f_px=%.1f, resolution=%dx%d", f_px, width, height)
+    
+    # 加载PLY文件
+    try:
+        gaussians, _ = load_ply(ply_path)
+    except Exception as e:
+        LOGGER.error("Failed to load %s: %s. Skipping.", ply_path.name, e)
+        return False
+    
+    # 提取基础名称（去除内参后缀）
+    # 从 {name}_{f_px}_{width}_{height}.ply 提取 {name}
+    pattern = r"^(.+)_\d+_\d+_\d+$"
+    match = re.match(pattern, ply_path.stem)
+    base_name = match.group(1) if match else ply_path.stem
+    
+    # 渲染单张图片，使用简化的文件名
+    output_image_path = output_path / f"{base_name}.png"
+    render_single_image(
+        gaussians=gaussians,
+        f_px=f_px,
+        width=width,
+        height=height,
+        output_path=output_image_path,
+        device=device,
+    )
+    
+    LOGGER.info("  Saved to %s", output_image_path)
+    return True
 
 
 def render_single_image(
