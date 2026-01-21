@@ -409,7 +409,10 @@ def load_ply(path: Path) -> tuple[Gaussians3D, SceneMetaData]:
 def save_ply(
     gaussians: Gaussians3D, f_px: float, image_shape: tuple[int, int], path: Path
 ) -> PlyData:
-    """Save a predicted Gaussian3D to a ply file with only intrinsics metadata."""
+    """Save a predicted Gaussian3D to a ply file.
+    
+    Camera intrinsics are saved in the filename format: {name}_{f_px}_{width}_{height}.ply
+    """
 
     def _inverse_sigmoid(tensor: torch.Tensor) -> torch.Tensor:
         return torch.log(tensor / (1.0 - tensor))
@@ -462,29 +465,8 @@ def save_ply(
     elements[:] = list(map(tuple, attributes.detach().cpu().numpy()))
     vertex_elements = PlyElement.describe(elements, "vertex")
 
-    # Load image-wise metadata.
-    image_height, image_width = image_shape
-
-    # Export intrinsics only.
-    dtype_intrinsic = [("intrinsic", "f4")]
-    intrinsic_array = np.empty(9, dtype=dtype_intrinsic)
-    intrinsic = np.array(
-        [
-            f_px,
-            0,
-            image_width * 0.5,
-            0,
-            f_px,
-            image_height * 0.5,
-            0,
-            0,
-            1,
-        ]
-    )
-    intrinsic_array[:] = intrinsic.flatten()
-    intrinsic_element = PlyElement.describe(intrinsic_array, "intrinsic")
-
-    plydata = PlyData([vertex_elements, intrinsic_element])
+    # Only save vertex data, camera intrinsics are encoded in filename
+    plydata = PlyData([vertex_elements])
 
     plydata.write(path)
     return plydata
