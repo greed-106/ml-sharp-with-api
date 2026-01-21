@@ -16,13 +16,14 @@ We present SHARP, an approach to photorealistic view synthesis from a single ima
 We recommend to first create a python environment:
 
 ```
-conda create -n sharp python=3.13
+uv venv .venv --python 3.13
 ```
 
 Afterwards, you can install the project using
 
 ```
-pip install -r requirements.txt
+uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+uv pip install -r requirements.txt
 ```
 
 To test the installation, run
