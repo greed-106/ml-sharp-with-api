@@ -184,7 +184,9 @@ def predict_cli(
         )
 
         LOGGER.info("Saving 3DGS to %s", output_path)
-        save_ply(gaussians, f_px, (height, width), output_path / f"{image_path.stem}.ply")
+        # 使用新的命名格式: originname_{f_px}_{image_width}_{image_height}.ply
+        output_filename = f"{image_path.stem}_{int(f_px)}_{width}_{height}.ply"
+        save_ply(gaussians, f_px, (height, width), output_path / output_filename)
 
         if with_rendering:
             output_video_path = (output_path / image_path.stem).with_suffix(".mp4")

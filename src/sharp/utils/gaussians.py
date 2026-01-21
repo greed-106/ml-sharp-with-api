@@ -409,7 +409,7 @@ def load_ply(path: Path) -> tuple[Gaussians3D, SceneMetaData]:
 def save_ply(
     gaussians: Gaussians3D, f_px: float, image_shape: tuple[int, int], path: Path
 ) -> PlyData:
-    """Save a predicted Gaussian3D to a ply file."""
+    """Save a predicted Gaussian3D to a ply file with only intrinsics metadata."""
 
     def _inverse_sigmoid(tensor: torch.Tensor) -> torch.Tensor:
         return torch.log(tensor / (1.0 - tensor))
@@ -433,7 +433,6 @@ def save_ply(
     colors = convert_rgb_to_spherical_harmonics(
         cs_utils.linearRGB2sRGB(gaussians.colors.flatten(0, 1))
     )
-    color_space_index = cs_utils.encode_color_space("sRGB")
 
     # Store opacity logits.
     opacity_logits = _inverse_sigmoid(gaussians.opacities).flatten(0, 1).unsqueeze(-1)
@@ -466,13 +465,7 @@ def save_ply(
     # Load image-wise metadata.
     image_height, image_width = image_shape
 
-    # Export image size.
-    dtype_image_size = [("image_size", "u4")]
-    image_size_array = np.empty(2, dtype=dtype_image_size)
-    image_size_array[:] = np.array([image_width, image_height])
-    image_size_element = PlyElement.describe(image_size_array, "image_size")
-
-    # Export intrinsics.
+    # Export intrinsics only.
     dtype_intrinsic = [("intrinsic", "f4")]
     intrinsic_array = np.empty(9, dtype=dtype_intrinsic)
     intrinsic = np.array(
@@ -491,55 +484,7 @@ def save_ply(
     intrinsic_array[:] = intrinsic.flatten()
     intrinsic_element = PlyElement.describe(intrinsic_array, "intrinsic")
 
-    # Export dummy extrinsics.
-    dtype_extrinsic = [("extrinsic", "f4")]
-    extrinsic_array = np.empty(16, dtype=dtype_extrinsic)
-    extrinsic_array[:] = np.eye(4).flatten()
-    extrinsic_element = PlyElement.describe(extrinsic_array, "extrinsic")
-
-    # Export number of frames and particles per frame.
-    dtype_frames = [("frame", "i4")]
-    frame_array = np.empty(2, dtype=dtype_frames)
-    frame_array[:] = np.array([1, num_gaussians], dtype=np.int32)
-    frame_element = PlyElement.describe(frame_array, "frame")
-
-    # Export disparity ranges for transform.
-    dtype_disparity = [("disparity", "f4")]
-    disparity_array = np.empty(2, dtype=dtype_disparity)
-
-    disparity = 1.0 / gaussians.mean_vectors[0, ..., -1]
-    quantiles = (
-        torch.quantile(disparity, q=torch.tensor([0.1, 0.9], device=disparity.device))
-        .float()
-        .cpu()
-        .numpy()
-    )
-    disparity_array[:] = quantiles
-    disparity_element = PlyElement.describe(disparity_array, "disparity")
-
-    # Export colorspace.
-    dtype_color_space = [("color_space", "u1")]
-    color_space_array = np.empty(1, dtype=dtype_color_space)
-    color_space_array[:] = np.array([color_space_index]).flatten()
-    color_space_element = PlyElement.describe(color_space_array, "color_space")
-
-    dtype_version = [("version", "u1")]
-    version_array = np.empty(3, dtype=dtype_version)
-    version_array[:] = np.array([1, 5, 0], dtype=np.uint8).flatten()
-    version_element = PlyElement.describe(version_array, "version")
-
-    plydata = PlyData(
-        [
-            vertex_elements,
-            extrinsic_element,
-            intrinsic_element,
-            image_size_element,
-            frame_element,
-            disparity_element,
-            color_space_element,
-            version_element,
-        ]
-    )
+    plydata = PlyData([vertex_elements, intrinsic_element])
 
     plydata.write(path)
     return plydata
